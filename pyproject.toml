@@ -1,0 +1,62 @@
+[project]
+name = "errorz"
+version = "0.1.0"
+description = "Represent fallible computations as values, instead of using exceptions."
+readme = "README.md"
+authors = [
+    { name = "Fábio Macêdo Mendes", email = "fabiomacedomendes@gmail.com" },
+]
+maintainers = [
+    { name = "Fábio Macêdo Mendes", email = "fabiomacedomendes@gmail.com" },
+]
+requires-python = ">=3.13"
+dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
+license = "MIT"
+
+[project.urls]
+Homepage = "http://github.com/fabiommendes/errorz"
+Repository = "http://github.com/fabiommendes/errorz"
+Documentation = "https://errorz.readthedocs.io/"
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "errorz"
+
+[tool.mypy]
+strict = true
+plugins = ["errorz.mypy:plugin"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.155.2",
+    "mypy>=2.1.0",
+    "myst-parser>=5.1.0",
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "rich>=15.0.0",
+    "ruff>=0.15.15",
+    "sphinx>=8.0.0",
+    "sphinx-autobuild>=2025.8.25",
+    "sphinx-autodoc-typehints>=3.11.0",
+    "sphinx-mdinclude>=0.6.2",
+    "taskipy>=1.14.1",
+]
+
+[tool.taskipy.tasks]
+docs = { cmd = "sphinx-build -b html docs/source docs/build", help = "Build HTML documentation" }
+docs-serve = { cmd = "sphinx-autobuild docs/source docs/build", help = "Serve HTML documentation with live reload" }
+test = "pytest tests"
+lint = "ruff check ."
+build = "uv build"
