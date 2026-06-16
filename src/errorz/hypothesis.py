@@ -8,6 +8,8 @@ import errorz as rz
 
 EXCEPTION_LIST = [Exception, ValueError, TypeError, KeyError, IndexError]
 
+__all__ = ["result", "exceptions", "errors", "error_messages"]
+
 
 @st.composite
 def result[T, E = Any](
@@ -17,8 +19,10 @@ def result[T, E = Any](
     Generate Results with random values.
 
     Args:
-        value: A strategy to generate the ok values.
-        error: A strategy to generate the err values.
+        value:
+            A strategy to generate the ok values.
+        error:
+            A strategy to generate the err values.
             If None is given, it will generate random exceptions or primitive values as errors.
     """
 
@@ -43,8 +47,8 @@ def result[T, E = Any](
 
 
 def exceptions(
-    exceptions: Iterable[type[BaseException]] | None = None,
-) -> st.SearchStrategy[BaseException]:
+    exceptions: Iterable[type[Exception]] | None = None,
+) -> st.SearchStrategy[Exception]:
     """
     Generate exceptions with random messages.
 
@@ -60,12 +64,26 @@ def exceptions(
     return st.one_of([st.builds(exc, error_messages()) for exc in exceptions])
 
 
+def errors[E = Exception](
+    error: st.SearchStrategy[E] | None = None,
+) -> st.SearchStrategy[rz.Err[E]]:
+    """
+    Generate random error values.
+
+    By default, it generates random exceptions with random messages.
+    """
+    value = cast("st.SearchStrategy[E]", error or exceptions())
+    return value.map(rz.Err)
+
+
 def error_messages() -> st.SearchStrategy[str]:
     """
     Generate random error messages.
 
     Those are small strings with common letters. We are not trying to stress
     test the string handling capabilities of our error types.
+
+    If you want to stress test this, use the builtin st.text() strategy.
     """
     return st.one_of(
         st.sampled_from(["error", "fail", "invalid", "..."]),

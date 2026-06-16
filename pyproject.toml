@@ -1,6 +1,6 @@
 [project]
 name = "errorz"
-version = "0.1.0"
+version = "0.2.0"
 description = "Represent fallible computations as values, instead of using exceptions."
 readme = "README.md"
 authors = [
@@ -53,6 +53,7 @@ dev = [
     "sphinx-mdinclude>=0.6.2",
     "taskipy>=1.14.1",
 ]
+hypothesis = ["hypothesis>=6.155.2"]
 
 [tool.taskipy.tasks]
 docs = { cmd = "sphinx-build -b html docs/source docs/build", help = "Build HTML documentation" }

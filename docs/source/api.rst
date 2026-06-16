@@ -9,32 +9,60 @@ API Reference
 
    All functions are fully typed and the type annotations are mostly correct.
 
-Unwrapping options
-------------------
+Error class
+-----------
 
-.. autofunction:: opt.unwrap
-.. autofunction:: opt.unwrap_or
-.. autofunction:: opt.unwrap_or_else
-.. autofunction:: opt.expect
+.. autoclass:: errorz.Err
+   :members:
 
 
-Mapping over options
---------------------
+Creating and testing results
+----------------------------
 
-.. autofunction:: opt.map
-.. autofunction:: opt.call
-
-
-Zipping and combining options
------------------------------
-
-.. autofunction:: opt.zip
-.. autofunction:: opt.together
+.. autofunction:: errorz.ok
+.. autofunction:: errorz.err
+.. autofunction:: errorz.is_err
 
 
-Iterating over options
-----------------------
+Unwrapping
+----------
 
-.. autofunction:: opt.iter
-.. autofunction:: opt.elements
-.. autofunction:: opt.values
+.. autofunction:: errorz.unwrap
+.. autofunction:: errorz.expect
+.. autofunction:: errorz.check
+.. autofunction:: errorz.unwrap_lazy
+
+
+Mapping
+-------
+
+.. autofunction:: errorz.map
+.. autofunction:: errorz.call
+
+
+Zipping and combining
+---------------------
+
+.. autofunction:: errorz.zip
+.. autofunction:: errorz.together
+
+
+Iterators, sequences, and other collections
+-------------------------------------------
+
+.. autofunction:: errorz.iter
+.. autofunction:: errorz.some
+.. autofunction:: errorz.filter
+.. autofunction:: errorz.filter_values
+.. autofunction:: errorz.non_empty
+.. autofunction:: errorz.single
+
+
+Testing with Hypothesis
+-----------------------
+
+.. autofunction:: errorz.hypothesis.result
+.. autofunction:: errorz.hypothesis.exceptions
+.. autofunction:: errorz.hypothesis.errors
+.. autofunction:: errorz.hypothesis.error_messages
+

@@ -38,9 +38,8 @@ def assert_errorz_types() -> None:
     #
     # Basic tests
     #
-    assert_type(rz.is_ok(i), bool)
     assert_type(rz.is_err(i), bool)
-    assert_type(rz.validate(i), bool)
+    assert_type(rz.check(i), bool)
 
     #
     # Unwraps
@@ -78,7 +77,7 @@ def assert_errorz_types() -> None:
     #
     # Sequences
     #
-    assert_type(rz.values([i, e, i]), Iterable[int])
+    assert_type(rz.filter([i, e, i]), Iterable[int])
 
     #
     # Arithmetic
@@ -97,3 +96,16 @@ def assert_errorz_types() -> None:
         return x
 
     assert_type(id(i), Result[int, E])
+
+
+def assert_boolean_narrowing() -> None:
+    class Foo:
+        def __bool__(self) -> Literal[True]:
+            return True
+
+    foo = mk(Foo())
+
+    if foo:
+        assert_type(foo, Foo)
+    else:
+        assert_type(foo, rz.Err[Exception])

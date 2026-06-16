@@ -24,6 +24,8 @@ help vendorizing it. It is distributed as a package, instead of a errorz.py file
 to allow for py.typed marker.
 """
 
+from __future__ import annotations
+
 import builtins
 import functools
 from types import NotImplementedType
@@ -31,7 +33,10 @@ from typing import (
     Any,
     Callable,
     Generic,
+    Hashable,
     Iterable,
+    Literal,
+    Mapping,
     Optional,
     Protocol,
     Self,
@@ -56,9 +61,9 @@ __all__ = (
     "expect",
     "map",
     "coalesce",
-    "values",
+    "filter",
     "zip",
-    "elements",
+    "some",
     "getattr",
     "call",
     "iter",
@@ -73,7 +78,6 @@ T_co = TypeVar("T_co", covariant=True)
 type Result[T, E = Any] = T | Err[E]
 
 
-@final
 class Err(Generic[E_co]):
     """
     A simple error wrapper that implements the Error protocol. It is used to wrap
@@ -92,10 +96,14 @@ class Err(Generic[E_co]):
     def __repr__(self) -> str:
         return f"Err({self._error!r})"
 
+    def __hash__[E: Hashable](self: Err[E]) -> int:
+        return hash(self._error)
+
     #
     # Python magic methods
     #
-    def __bool__(self) -> bool:
+    @final
+    def __bool__(self) -> Literal[False]:
         return False
 
     # Arithmetic operations
@@ -211,6 +219,7 @@ def _any(x: object) -> Any:
     return x
 
 
+_iter = builtins.iter
 _getattr = builtins.getattr
 
 
@@ -283,6 +292,10 @@ def is_err(value: Result[Any], /) -> TypeIs[Err]:
         False
 
     Notes:
+        The corresponding is_ok() does not exist because typecheckers often struggle
+        with type narrowing because Python type system do not include negative
+        bounds (e.g. "T but not Err").
+
         The Err case evaluates to False. If you known that T is never falsy,
         you can just use the common Pythonic ways of checking for nullable
         values:
@@ -298,25 +311,9 @@ def is_err(value: Result[Any], /) -> TypeIs[Err]:
     return isinstance(value, Err)
 
 
-def is_ok[T](value: Result[T], /) -> TypeIs[T]:
+def check[T](value: Result[T], /) -> TypeIs[T]:
     """
-    Check if result is in the Ok case.
-
-    Args:
-        value: The result value to check.
-
-    Examples:
-        >>> rz.is_ok(rz.err('error'))
-        False
-        >>> rz.is_ok(42)
-        True
-    """
-    return not isinstance(value, Err)
-
-
-def validate[T](value: Result[T], /) -> TypeIs[T]:
-    """
-    Accept the Ok and return True.
+    Check if value is not an Err and return True.
 
     If the value is an error, raise it or a UnwrapError if E is not an exception.
 
@@ -648,22 +645,6 @@ def coalesce(*values: Any) -> Any:
     return err
 
 
-def values[T, E](seq: Iterable[Result[T, E]], /) -> Iterable[T]:
-    """
-    Return an iterable of the non-error values in the given sequence.
-
-    Args:
-        seq: The sequence of options to filter.
-
-    Examples:
-        >>> list(rz.values([1, 2, rz.err('error'), 3]))
-        [1, 2, 3]
-        >>> list(rz.values([rz.err("error 1"), rz.err("error 2")]))
-        []
-    """
-    return (x for x in seq if not isinstance(x, Err))
-
-
 @overload
 def zip[T1, T2, E](
     x1: Result[T1, E], x2: Result[T2, E], /
@@ -759,40 +740,6 @@ def zip(*args: Any) -> Any:
         if isinstance(arg, Err):
             return arg
     return args
-
-
-def elements[T, E](value: Result[T, E]) -> Iterable[T]:
-    """
-    Yield nothing or the optional value, if it exists.
-
-    Args:
-        value: The optional value to yield.
-
-    Examples:
-        >>> list(rz.elements(42))
-        [42]
-        >>> list(rz.elements(rz.err('error')))
-        []
-    """
-    if not isinstance(value, Err):
-        yield value
-
-
-def iter[T, E](value: Result[Iterable[T], E]) -> Iterable[T]:
-    """
-    Yield nothing or the elements of an iterable.
-
-    Args:
-        value: The optional iterable to yield from.
-
-    Examples:
-        >>> list(rz.iter([42]))
-        [42]
-        >>> list(rz.iter(rz.err('error')))
-        []
-    """
-    if not isinstance(value, Err):
-        yield from value
 
 
 class Caller[**P, R](Protocol):
@@ -1001,3 +948,146 @@ def _wrap_safe[F: Callable[..., Any]](fn: Any, impl: F) -> F:
     if ret_type is not None:
         impl.__annotations__["return"] = Result[ret_type, Exception]  # type: ignore
     return impl
+
+
+#
+# Lists, iterators, and other collections
+#
+def some[T, E](value: Result[T, E]) -> Iterable[T]:
+    """
+    Yield nothing or the ok value, if it exists.
+
+    Args:
+        value: The fallible value to yield.
+
+    Examples:
+        >>> list(rz.some(42))
+        [42]s
+        >>> list(rz.some(rz.err('error')))
+        []
+    """
+    if not isinstance(value, Err):
+        yield value
+
+
+def iter[T, E](value: Result[Iterable[T], E]) -> Iterable[T]:
+    """
+    Yield nothing or the elements of an iterable.
+
+    Args:
+        value: The fallible iterable to yield from.
+
+    Examples:
+        >>> list(rz.iter([42]))
+        [42]
+        >>> list(rz.iter(rz.err('error')))
+        []
+    """
+    if not isinstance(value, Err):
+        yield from value
+
+
+def filter[T, E](seq: Iterable[Result[T, E]], /) -> Iterable[T]:
+    """
+    Return an iterable of the non-error values in the given sequence.
+
+    Args:
+        seq: The sequence of fallible values to filter.
+
+    Examples:
+        >>> list(rz.values([1, 2, rz.err('error'), 3]))
+        [1, 2, 3]
+        >>> list(rz.values([rz.err("error 1"), rz.err("error 2")]))
+        []
+    """
+    return (x for x in seq if not isinstance(x, Err))
+
+
+def filter_values[K, V, E](seq: Mapping[K, Result[V, E]], /) -> dict[K, V]:
+    """
+    Remove all Err values from the given mapping.
+
+    Args:
+        seq: The mapping of fallible values to filter.
+
+    Examples:
+        >>> rz.filter_values({'a': 1, 'b': rz.err('error'), 'c': 3})
+        {'a': 1, 'c': 3}
+        >>> rz.filter_values({'a': rz.err("error 1"), 'b': rz.err("error 2")})
+        {}
+    """
+    return {k: v for k, v in seq.items() if not isinstance(v, Err)}
+
+
+@overload
+def non_empty[T](seq: Iterable[T], /) -> Result[list[T], IndexError]: ...
+
+
+@overload
+def non_empty[T, E](seq: Iterable[T], /, error: E) -> Result[list[T], E]: ...
+
+
+def non_empty[T](seq: Iterable[T], /, error: Any = MISSING) -> Result[list[T], Any]:
+    """
+    Return the given sequence if it contains at least one non-error value, or an Error otherwise.
+
+    Args:
+        seq: The sequence of values to check.
+        error: The error to return if the sequence is empty (defaults to IndexError).
+
+    Examples:
+        >>> rz.non_empty([1, 2, 3])
+        [1, 2, 3]
+        >>> rz.non_empty([])
+        Err(IndexError())
+        >>> rz.non_empty([], error="Sequence is empty")
+        Err('Sequence is empty')
+    """
+    values = list(seq)
+    if values:
+        return values
+    if error is MISSING:
+        return Err(cast(Any, IndexError("Sequence is empty")))
+    return Err(error)
+
+
+@overload
+def single[T](seq: Iterable[T], /) -> Result[T, IndexError]: ...
+
+
+@overload
+def single[T, E](seq: Iterable[T], /, error: E) -> Result[T, E]: ...
+
+
+def single[T](seq: Iterable[T], /, error: Any = MISSING) -> Result[T, Any]:
+    """
+    Return the single element in the given sequence, or an Error otherwise.
+
+    Args:
+        seq: The sequence of values to check.
+        error: The error to return if the sequence does not contain exactly one non-error value (defaults to IndexError).
+
+    Examples:
+        >>> rz.single([42])
+        42
+        >>> rz.single([])
+        Err(ValueError())
+        >>> rz.single([1, 2])
+        Err(ValueError())
+        >>> rz.single([], error="No single value")
+        Err('No single value')
+    """
+    it = _iter(seq)
+    try:
+        value = next(it)
+    except StopIteration:
+        if error is MISSING:
+            return Err(cast(Any, IndexError("Sequence is empty")))
+        return Err(error)
+    try:
+        next(it)
+        if error is MISSING:
+            return Err(cast(Any, IndexError("Sequence contains more than one value")))
+        return Err(error)
+    except StopIteration:
+        return value
