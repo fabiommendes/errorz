@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import builtins
 import functools
+from collections import deque
 from types import NotImplementedType
 from typing import (
     Any,
@@ -35,8 +36,10 @@ from typing import (
     Generic,
     Hashable,
     Iterable,
+    Iterator,
     Literal,
     Mapping,
+    NamedTuple,
     Optional,
     Protocol,
     Self,
@@ -85,6 +88,7 @@ class Err(Generic[E_co]):
     """
 
     __is_errorz_error__ = True
+    __match_args__ = ("error",)
 
     @property
     def error(self) -> E_co:
@@ -215,6 +219,15 @@ class Err(Generic[E_co]):
         return UnwrapError(e)
 
 
+class Tagged[T, B: bool](NamedTuple):
+    value: T
+    is_error: B
+
+
+type IsErr[E] = Tagged[E, Literal[True]]
+type IsOk[T] = Tagged[T, Literal[False]]
+
+
 def _any(x: object) -> Any:
     return x
 
@@ -325,6 +338,27 @@ def check[T](value: Result[T], /) -> TypeIs[T]:
     return True
 
 
+def tagged[T, E](value: Result[T, E], /) -> IsOk[T] | IsErr[E]:
+    """
+    Check if the value is an error and return False if it is, True otherwise.
+
+    Args:
+        value: The result value to check.
+
+    Returns:
+        True if the value is not an error, False otherwise.
+
+    Examples:
+        >>> rz.tagged(42)
+        Tagged(value=42, is_error=False)
+        >>> rz.tagged(rz.err('error'))
+        Tagged(value='error', is_error=True)
+    """
+    if isinstance(value, Err):
+        return cast("IsErr[E]", Tagged(value=value.error, is_error=True))
+    return cast("IsOk[T]", Tagged(value=value, is_error=False))
+
+
 #
 # Unwrappers
 #
@@ -413,6 +447,62 @@ def expect[T](value: Result[T], /, error: str | BaseException) -> T:
     raise UnwrapError(error)
 
 
+def extract[T, E](fn: Callable[[E], T], value: Result[T, E], /) -> T:
+    """
+    Extract the value from the result.
+
+    If it is an error, transform it with the given function.
+
+    Args:
+        fn: The function to apply in case of errors.
+        value: The result value to extract the error from.
+
+    Examples:
+        >>> rz.extract(lambda e: f"error: {e}", rz.err(42))
+        'error: 42'
+        >>> rz.extract(lambda e: str(e), "ok")
+        'ok'
+    """
+    return fn(value.error) if isinstance(value, Err) else value
+
+
+def unpack[T, E, R](
+    value: Result[T, E], /, ok: Callable[[T], R], err: Callable[[E], R]
+) -> R:
+    """
+    Unpack a result value using either the ok or err functions.
+
+    This is useful for chaining operations that may return errors without having to
+    check for errors at each step.
+
+    Args:
+        value:
+            The result value to unpack.
+        ok:
+            The function to apply if the value is an ok value.
+        err:
+            The function to apply if the value is an error.
+
+    Examples:
+        >>> rz.unpack(rz.err("error"), ok=str, err=str.upper)
+        'ERROR'
+        >>> rz.unpack(42, ok=str, err=str.upper)
+        '42'
+
+    Notes:
+        This can be used as a poor-man's match statement. Real match statements
+        are supported, but there is no explicit Ok() case:
+
+        >>> result = rz.err("error")
+        >>> match result:
+        ...     case rz.Err(error):
+        ...         pass # code in the error case
+        ...     case value:
+        ...         pass # code in the ok case
+    """
+    return err(value.error) if isinstance(value, Err) else ok(value)
+
+
 def to_optional[T](value: Result[T, Any]) -> Optional[T]:
     """
     Convert a Result to an Optional by converting any error to None.
@@ -427,6 +517,40 @@ def to_optional[T](value: Result[T, Any]) -> Optional[T]:
     if isinstance(value, Err):
         return None
     return value
+
+
+def error[Any, E](value: Result[Any, E], /) -> Optional[E]:
+    """
+    Get the error value if the result is an error, None otherwise.
+
+    Args:
+        value: The result value to check.
+    Examples:
+        >>> rz.error(42) is None
+        True
+        >>> rz.error(rz.err('error'))
+        'error'
+    """
+    if isinstance(value, Err):
+        return value.error
+    return None
+
+
+def swap[T, E](value: Result[T, E], /) -> Result[E, T]:
+    """
+    Swap the ok and error values of a result.
+
+    Args:
+        value: The result value to swap.
+    Examples:
+        >>> rz.swap(42)
+        Err(42)
+        >>> rz.swap(rz.err('error'))
+        'error'
+    """
+    if isinstance(value, Err):
+        return value.error
+    return Err(value)
 
 
 @overload
@@ -543,6 +667,28 @@ def map(fn: Any, *values: Any) -> Any:
     return fn(*values)
 
 
+def map_err[T, E, R](fn: Callable[[E], R], value: Result[T, E], /) -> Result[T, R]:
+    """
+    Apply the function to the error value if it is an error, otherwise return
+    the ok value.
+
+    Args:
+        fn:
+            The function to apply to the error case.
+        value:
+            The result value to check.
+
+    Examples:
+        >>> rz.map_err(lambda e: f"error: {e}", rz.err(42))
+        Err('error: 42')
+        >>> rz.map_err(lambda e: f"error: {e}", 42)
+        42
+    """
+    if isinstance(value, Err):
+        return Err(fn(value.error))
+    return value
+
+
 @overload
 def coalesce[T, E](values: Iterable[Result[T, E]], /) -> Result[T, E]: ...
 
@@ -617,32 +763,143 @@ def coalesce[T1, T2, T3, T4, T5, T6, T7, T8, E](
 
 def coalesce(*values: Any) -> Any:
     """
-    Return the first value that is not an error, or the first error if all values are errors.
+    Return the first value that is not an error, or the last error if all values
+    are errors.
+
+    This function works as short-circuiting "or" as if Ok values are thruthy
+    and Err values are falsy.
 
     Examples:
         >>> rz.coalesce(rz.err("e1"), rz.err("e2"), 42, 43, ...)
         42
         >>> rz.coalesce(rz.err("e1"), rz.err("e2"))
-        Err('e1')
+        Err('e2')
         >>> rz.coalesce([rz.err("e1"), rz.err("e2"), 42, 43, ...])
         42
 
     See also:
         - :func:`rz.zip`
-        - :func:`rz.values`
+        - :func:`rz.all`
     """
     if len(values) == 1:
         values = values[0]
 
-    err: Err[Any] | None = None
+    value: Any = None
     for value in values:
         if not isinstance(value, Err):
             return value
-        elif err is None:
-            err = value
-    if err is None:
+    if value is None:
         raise ValueError("coalesce() expected at least one value")
-    return err
+    return value
+
+
+@overload
+def all[T, E](values: Iterable[Result[T, E]], /) -> Result[T, E]: ...
+
+
+@overload
+def all[T1, T2, E1, E2](
+    x1: Result[T1, E1], x2: Result[T2, E2], /
+) -> Result[T1 | T2, E1 | E2]: ...
+
+
+@overload
+def all[T1, T2, T3, E](
+    x1: Result[T1, E], x2: Result[T2, E], x3: Result[T3, E], /
+) -> Result[T1 | T2 | T3, E]: ...
+
+
+@overload
+def all[T1, T2, T3, T4, E](
+    x1: Result[T1, E], x2: Result[T2, E], x3: Result[T3, E], x4: Result[T4, E], /
+) -> Result[T1 | T2 | T3 | T4, E]: ...
+
+
+@overload
+def all[T1, T2, T3, T4, T5, E](
+    x1: Result[T1, E],
+    x2: Result[T2, E],
+    x3: Result[T3, E],
+    x4: Result[T4, E],
+    x5: Result[T5, E],
+    /,
+) -> Result[T1 | T2 | T3 | T4 | T5, E]: ...
+
+
+@overload
+def all[T1, T2, T3, T4, T5, T6, E](
+    x1: Result[T1, E],
+    x2: Result[T2, E],
+    x3: Result[T3, E],
+    x4: Result[T4, E],
+    x5: Result[T5, E],
+    x6: Result[T6, E],
+    /,
+) -> Result[T1 | T2 | T3 | T4 | T5 | T6, E]: ...
+
+
+@overload
+def all[T1, T2, T3, T4, T5, T6, T7, E](
+    x1: Result[T1, E],
+    x2: Result[T2, E],
+    x3: Result[T3, E],
+    x4: Result[T4, E],
+    x5: Result[T5, E],
+    x6: Result[T6, E],
+    x7: Result[T7, E],
+    /,
+) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7, E]: ...
+
+
+@overload
+def all[T1, T2, T3, T4, T5, T6, T7, T8, E](
+    x1: Result[T1, E],
+    x2: Result[T2, E],
+    x3: Result[T3, E],
+    x4: Result[T4, E],
+    x5: Result[T5, E],
+    x6: Result[T6, E],
+    x7: Result[T7, E],
+    x8: Result[T8, E],
+    /,
+) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, E]: ...
+
+
+def all(*values: Any) -> Any:
+    """
+    Return the first error in the arguments. If no argument is an error, return
+    the last ok value.
+
+    This function works as short-circuiting "and" as if Ok values are thruthy
+    and Err values are falsy.
+
+    Args:
+        x1, x2, ...:
+            The result values to check.
+            It accepts any number of arguments (but only type checks up to 8).
+
+    Examples:
+        >>> rz.all(1, 2, 3)
+        3
+        >>> rz.all(1, rz.err("e1"), rz.err("e2"))
+        Err('e1')
+
+    See also:
+        - :func:`rz.coalesce`
+    """
+    if len(values) == 1:
+        values = values[0]
+
+    if len(values) == 1:
+        values = values[0]
+
+    for value in values:
+        if isinstance(value, Err):
+            return value
+    try:
+        return value  # pyright: ignore[reportPossiblyUnboundVariable]
+    except NameError:
+        raise ValueError("all() expected at least one value")
 
 
 @overload
@@ -962,7 +1219,7 @@ def some[T, E](value: Result[T, E]) -> Iterable[T]:
 
     Examples:
         >>> list(rz.some(42))
-        [42]s
+        [42]
         >>> list(rz.some(rz.err('error')))
         []
     """
@@ -995,12 +1252,84 @@ def filter[T, E](seq: Iterable[Result[T, E]], /) -> Iterable[T]:
         seq: The sequence of fallible values to filter.
 
     Examples:
-        >>> list(rz.values([1, 2, rz.err('error'), 3]))
+        >>> list(rz.filter([1, 2, rz.err('error'), 3]))
         [1, 2, 3]
-        >>> list(rz.values([rz.err("error 1"), rz.err("error 2")]))
+        >>> list(rz.filter([rz.err("error 1"), rz.err("error 2")]))
         []
     """
     return (x for x in seq if not isinstance(x, Err))
+
+
+def partition[T, E](seq: Iterable[Result[T, E]], /) -> tuple[Iterable[T], Iterable[E]]:
+    """
+    Partition the given sequence into two sequence: one of non-error values and one of error values.
+
+    Args:
+        seq: The sequence of fallible values to partition.
+
+    Examples:
+        >>> oks, errs = rz.partition([1, 2, rz.err('error'), 3])
+        >>> list(oks)
+        [1, 2, 3]
+        >>> list(errs)
+        ['error']
+    """
+    next = _iter(seq).__next__
+    seen_values = deque["T"]()
+    seen_errors = deque["E"]()
+
+    def oks() -> Iterator[T]:
+        while True:
+            try:
+                if seen_values:
+                    yield seen_values.popleft()
+                    continue
+                if isinstance(value := next(), Err):
+                    seen_errors.append(value.error)
+                    continue
+                yield value
+            except StopIteration:
+                return
+
+    def errors() -> Iterator[E]:
+        while True:
+            try:
+                if seen_errors:
+                    yield seen_errors.popleft()
+                    continue
+                if isinstance(value := next(), Err):
+                    seen_errors.append(value.error)
+                    continue
+                seen_values.append(value)
+            except StopIteration:
+                return
+
+    # Is it faster to use itertools.tee?
+    return oks(), errors()
+
+
+def combine[T, E](seq: Iterable[Result[T, E]], /) -> Result[list[T], E]:
+    """
+    Combine the given sequence of fallible values into a single list if all
+    values are non-errors.
+
+    Return the first error found otherwise.
+
+    Args:
+        seq: The sequence of fallible values to combine.
+
+    Examples:
+        >>> rz.combine([1, 2, 3])
+        [1, 2, 3]
+        >>> rz.combine([1, 2, rz.err('error')])
+        Err('error')
+    """
+    values = []
+    for value in seq:
+        if isinstance(value, Err):
+            return value
+        values.append(value)
+    return values
 
 
 def filter_values[K, V, E](seq: Mapping[K, Result[V, E]], /) -> dict[K, V]:
@@ -1039,7 +1368,7 @@ def non_empty[T](seq: Iterable[T], /, error: Any = MISSING) -> Result[list[T], A
         >>> rz.non_empty([1, 2, 3])
         [1, 2, 3]
         >>> rz.non_empty([])
-        Err(IndexError())
+        Err(IndexError(...))
         >>> rz.non_empty([], error="Sequence is empty")
         Err('Sequence is empty')
     """
@@ -1071,9 +1400,9 @@ def single[T](seq: Iterable[T], /, error: Any = MISSING) -> Result[T, Any]:
         >>> rz.single([42])
         42
         >>> rz.single([])
-        Err(ValueError())
+        Err(IndexError(...))
         >>> rz.single([1, 2])
-        Err(ValueError())
+        Err(IndexError(...))
         >>> rz.single([], error="No single value")
         Err('No single value')
     """

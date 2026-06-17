@@ -109,3 +109,12 @@ def assert_boolean_narrowing() -> None:
         assert_type(foo, Foo)
     else:
         assert_type(foo, rz.Err[Exception])
+
+
+def assert_match_cases() -> None:
+    result = mk(1)
+    match result:
+        case rz.Err(error):
+            assert_type(error, E)
+        case value:
+            assert_type(value, int)

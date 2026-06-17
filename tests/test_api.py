@@ -4,8 +4,11 @@ import errorz as rz
 
 
 def test_doctests() -> None:
-
-    result = doctest.testmod(rz, globs={"rz": rz})
+    result = doctest.testmod(
+        rz,
+        globs={"rz": rz},
+        optionflags=doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE,
+    )
     assert result.attempted > 0, "No doctests were found"
     assert result.failed == 0, f"{result.failed} doctests failed"
 

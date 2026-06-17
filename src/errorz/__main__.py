@@ -3,4 +3,8 @@ import doctest
 import errorz
 
 if __name__ == "__main__":
-    doctest.testmod(errorz, globs={"rz": errorz})
+    doctest.testmod(
+        errorz,
+        globs={"rz": errorz},
+        optionflags=doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE,
+    )
