@@ -17,11 +17,6 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-This is the main errorz module. It is implemented in a single Python file to
-help vendorizing it. It is distributed as a package, instead of a errorz.py file,
-to allow for py.typed marker.
 """
 
 from __future__ import annotations
@@ -40,6 +35,7 @@ from typing import (
     Literal,
     Mapping,
     NamedTuple,
+    Never,
     Optional,
     Protocol,
     Self,
@@ -51,7 +47,7 @@ from typing import (
 )
 
 # Raised when trying to unwrap a None value. It is an alias for ValueError to allow
-# mocking it in tests (or global mokey-patching if you are feelling adventurous).
+# mocking it in tests (or global monkey-patching if you are feeling adventurous).
 UnwrapError = ValueError
 
 __version__ = "0.1.0"
@@ -79,16 +75,22 @@ T_co = TypeVar("T_co", covariant=True)
 
 # type Result[T_co, E_co = Any] = Err[E_co] | T_co
 type Result[T, E = Any] = T | Err[E]
+type _ExcCatchable = type[Exception] | tuple[type[Exception], ...]
+type _ExceptionTuple = tuple[Exception, ...]
 
 
 class Err(Generic[E_co]):
     """
     A simple error wrapper that implements the Error protocol. It is used to wrap
     error values in a way that they can be distinguished from regular values.
+
+    The functions in this module work on subclasses of Err. So you may create
+    your own wrappers and define methods in the Err case specific to your
+    application.
     """
 
-    __is_errorz_error__ = True
     __match_args__ = ("error",)
+    __slots__ = ("_error",)
 
     @property
     def error(self) -> E_co:
@@ -108,6 +110,11 @@ class Err(Generic[E_co]):
     #
     @final
     def __bool__(self) -> Literal[False]:
+        return False
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, Err):
+            return self._error.__eq__(other._error)
         return False
 
     # Arithmetic operations
@@ -305,7 +312,7 @@ def is_err(value: Result[Any], /) -> TypeIs[Err]:
         False
 
     Notes:
-        The corresponding is_ok() does not exist because typecheckers often struggle
+        The corresponding is_ok() does not exist because type checkers often struggle
         with type narrowing because Python type system do not include negative
         bounds (e.g. "T but not Err").
 
@@ -381,8 +388,8 @@ def unwrap[T](value: Result[T], /, default: T = MISSING) -> T:
         ValueError: error
 
     See also:
-        - :func:`rz.expect`
-        - :func:`rz.unwrap_lazy`
+        - :func:`errorz.expect`
+        - :func:`errorz.unwrap_lazy`
     """
     if isinstance(value, Err):
         if default is MISSING:
@@ -396,7 +403,7 @@ def unwrap_lazy[T](value: Result[T], /, default: Callable[[], T]) -> T:
     Unwrap a value that may be None. If the value is None, return the result of
     calling the default function.
 
-    This may be used instead of :func:`rz.unwrap` when the default value is
+    This may be used instead of :func:`errorz.unwrap` when the default value is
     expensive to compute or produces side effects.
 
     Args:
@@ -410,7 +417,7 @@ def unwrap_lazy[T](value: Result[T], /, default: Callable[[], T]) -> T:
         42
 
     See also:
-        - :func:`rz.unwrap`
+        - :func:`errorz.unwrap`
     """
     if isinstance(value, Err):
         if default is MISSING:
@@ -438,7 +445,7 @@ def expect[T](value: Result[T], /, error: str | BaseException) -> T:
         ValueError: Value is an error
 
     See also:
-        - :func:`rz.unwrap`
+        - :func:`errorz.unwrap`
     """
     if not isinstance(value, Err):
         return value
@@ -454,8 +461,10 @@ def extract[T, E](fn: Callable[[E], T], value: Result[T, E], /) -> T:
     If it is an error, transform it with the given function.
 
     Args:
-        fn: The function to apply in case of errors.
-        value: The result value to extract the error from.
+        fn:
+            The function to apply to the error value.
+        value:
+            The result value to extract the error from.
 
     Examples:
         >>> rz.extract(lambda e: f"error: {e}", rz.err(42))
@@ -553,89 +562,37 @@ def swap[T, E](value: Result[T, E], /) -> Result[E, T]:
     return Err(value)
 
 
+# We use overload to improve error messages in the most common cases
 @overload
-def map[T, E, R](fn: Callable[[T], R], value: Result[T, E], /) -> Result[R, E]: ...
-
-
-@overload
-def map[T1, T2, E, R](
-    fn: Callable[[T1, T2], R], x1: Result[T1, E], x2: Result[T2, E], /
-) -> Result[R, E]: ...
+def map[T, R, E](fn: Callable[[T], R], value: Result[T, E], /) -> Result[R, E]: ...
 
 
 @overload
-def map[T1, T2, T3, E, R](
-    fn: Callable[[T1, T2, T3], R],
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
+def map[T1, T2, R, E1, E2](
+    fn: Callable[[T1, T2], R], x1: Result[T1, E1], x2: Result[T2, E2], /
+) -> Result[R, E1 | E2]: ...
+
+
+# fmt: off
+@overload
+def map[T1, T2, T3, R, E1, E2, E3, T4 = Never, T5 = Never, T6 = Never, T7 = Never, T8 = Never, E4 = Never, E5 = Never, E6 = Never, E7 = Never, E8 = Never](
+    fn: Callable[[T1, T2, T3], R]
+    | Callable[[T1, T2, T3, T4], R]
+    | Callable[[T1, T2, T3, T4, T5], R]
+    | Callable[[T1, T2, T3, T4, T5, T6], R]
+    | Callable[[T1, T2, T3, T4, T5, T6, T7], R]
+    | Callable[[T1, T2, T3, T4, T5, T6, T7, T8], R],
+    x1: Result[T1, E1],
+    x2: Result[T2, E2],
+    x3: Result[T3, E3],
+    x4: Result[T4, E4] = MISSING,
+    x5: Result[T5, E5] = MISSING,
+    x6: Result[T6, E6] = MISSING,
+    x7: Result[T7, E7] = MISSING,
+    x8: Result[T8, E8] = MISSING,
     /,
-) -> Result[R, E]: ...
-
-
-@overload
-def map[T1, T2, T3, T4, E, R](
-    fn: Callable[[T1, T2, T3, T4], R],
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    /,
-) -> Result[R, E]: ...
-
-
-@overload
-def map[T1, T2, T3, T4, T5, E, R](
-    fn: Callable[[T1, T2, T3, T4, T5], R],
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    /,
-) -> Result[R, E]: ...
-
-
-@overload
-def map[T1, T2, T3, T4, T5, T6, E, R](
-    fn: Callable[[T1, T2, T3, T4, T5, T6], R],
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    /,
-) -> Result[R, E]: ...
-
-
-@overload
-def map[T1, T2, T3, T4, T5, T6, T7, E, R](
-    fn: Callable[[T1, T2, T3, T4, T5, T6, T7], R],
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    /,
-) -> Result[R, E]: ...
-
-
-@overload
-def map[T1, T2, T3, T4, T5, T6, T7, T8, E, R](
-    fn: Callable[[T1, T2, T3, T4, T5, T6, T7, T8], R],
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    x8: Result[T8, E],
-    /,
-) -> Result[R, E]: ...
+) -> Result[R, E1 | E2 | E3 | E4 | E5 | E6 | E7 | E8]: ...
+# fmt: on
 
 
 def map(fn: Any, *values: Any) -> Any:
@@ -660,7 +617,7 @@ def map(fn: Any, *values: Any) -> Any:
         Err('error')
 
     See also:
-        - :func:`rz.zip`
+        - :func:`errorz.zip`
     """
     if any(is_err(value) for value in values):
         return next(value for value in values if is_err(value))
@@ -689,76 +646,26 @@ def map_err[T, E, R](fn: Callable[[E], R], value: Result[T, E], /) -> Result[T, 
     return value
 
 
+# fmt: off
 @overload
 def coalesce[T, E](values: Iterable[Result[T, E]], /) -> Result[T, E]: ...
 
+@overload
+def coalesce[T1, T2, E1, E2](x1: Result[T1, E1], x2: Result[T2, E2], /) -> Result[T1 | T2, E1 | E2]: ...
 
 @overload
-def coalesce[T1, T2, E1, E2](
-    x1: Result[T1, E1], x2: Result[T2, E2], /
-) -> Result[T1 | T2, E1 | E2]: ...
-
-
-@overload
-def coalesce[T1, T2, T3, E](
-    x1: Result[T1, E], x2: Result[T2, E], x3: Result[T3, E], /
-) -> Result[T1 | T2 | T3, E]: ...
-
-
-@overload
-def coalesce[T1, T2, T3, T4, E](
-    x1: Result[T1, E], x2: Result[T2, E], x3: Result[T3, E], x4: Result[T4, E], /
-) -> Result[T1 | T2 | T3 | T4, E]: ...
-
-
-@overload
-def coalesce[T1, T2, T3, T4, T5, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
+def coalesce[T1, T2, T3, E1, E2, E3, T4 = Never, T5 = Never, T6 = Never, T7 = Never, T8 = Never, E4 = Never, E5 = Never, E6 = Never, E7 = Never, E8 = Never](
+    x1: Result[T1, E1],
+    x2: Result[T2, E2], 
+    x3: Result[T3, E3], 
+    x4: Result[T4, E4] = MISSING, 
+    x5: Result[T5, E5] = MISSING, 
+    x6: Result[T6, E6] = MISSING, 
+    x7: Result[T7, E7] = MISSING, 
     /,
-) -> Result[T1 | T2 | T3 | T4 | T5, E]: ...
-
-
-@overload
-def coalesce[T1, T2, T3, T4, T5, T6, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    /,
-) -> Result[T1 | T2 | T3 | T4 | T5 | T6, E]: ...
-
-
-@overload
-def coalesce[T1, T2, T3, T4, T5, T6, T7, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    /,
-) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7, E]: ...
-
-
-@overload
-def coalesce[T1, T2, T3, T4, T5, T6, T7, T8, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    x8: Result[T8, E],
-    /,
-) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, E]: ...
+    *rest: Result[T8, E8], 
+) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, E1 | E2 | E3 | E4 | E5 | E6 | E7 | E8]: ...
+# fmt: on
 
 
 def coalesce(*values: Any) -> Any:
@@ -766,7 +673,7 @@ def coalesce(*values: Any) -> Any:
     Return the first value that is not an error, or the last error if all values
     are errors.
 
-    This function works as short-circuiting "or" as if Ok values are thruthy
+    This function works as short-circuiting "or" as if Ok values are truthy
     and Err values are falsy.
 
     Examples:
@@ -778,8 +685,8 @@ def coalesce(*values: Any) -> Any:
         42
 
     See also:
-        - :func:`rz.zip`
-        - :func:`rz.all`
+        - :func:`errorz.zip`
+        - :func:`errorz.separate`
     """
     if len(values) == 1:
         values = values[0]
@@ -793,84 +700,34 @@ def coalesce(*values: Any) -> Any:
     return value
 
 
+# fmt: off
 @overload
-def all[T, E](values: Iterable[Result[T, E]], /) -> Result[T, E]: ...
-
-
-@overload
-def all[T1, T2, E1, E2](
-    x1: Result[T1, E1], x2: Result[T2, E2], /
-) -> Result[T1 | T2, E1 | E2]: ...
-
+def separate[T, E](values: Iterable[Result[T, E]], /) -> Result[T, E]: ...
 
 @overload
-def all[T1, T2, T3, E](
-    x1: Result[T1, E], x2: Result[T2, E], x3: Result[T3, E], /
-) -> Result[T1 | T2 | T3, E]: ...
-
+def separate[T1, T2, E1, E2](x1: Result[T1, E1], x2: Result[T2, E2], /) -> Result[T1 | T2, E1 | E2]: ...
 
 @overload
-def all[T1, T2, T3, T4, E](
-    x1: Result[T1, E], x2: Result[T2, E], x3: Result[T3, E], x4: Result[T4, E], /
-) -> Result[T1 | T2 | T3 | T4, E]: ...
-
-
-@overload
-def all[T1, T2, T3, T4, T5, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
+def separate[T1, T2, T3, E1, E2, E3, T4 = Never, T5 = Never, T6 = Never, T7 = Never, T8 = Never, E4 = Never, E5 = Never, E6 = Never, E7 = Never, E8 = Never](
+    x1: Result[T1, E1],
+    x2: Result[T2, E2], 
+    x3: Result[T3, E3], 
+    x4: Result[T4, E4] = MISSING, 
+    x5: Result[T5, E5] = MISSING, 
+    x6: Result[T6, E6] = MISSING, 
+    x7: Result[T7, E7] = MISSING, 
     /,
-) -> Result[T1 | T2 | T3 | T4 | T5, E]: ...
+    *rest: Result[T8, E8], 
+) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, E1 | E2 | E3 | E4 | E5 | E6 | E7 | E8]: ...
+# fmt: on
 
 
-@overload
-def all[T1, T2, T3, T4, T5, T6, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    /,
-) -> Result[T1 | T2 | T3 | T4 | T5 | T6, E]: ...
-
-
-@overload
-def all[T1, T2, T3, T4, T5, T6, T7, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    /,
-) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7, E]: ...
-
-
-@overload
-def all[T1, T2, T3, T4, T5, T6, T7, T8, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    x8: Result[T8, E],
-    /,
-) -> Result[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, E]: ...
-
-
-def all(*values: Any) -> Any:
+def separate(*values: Any) -> Any:
     """
     Return the first error in the arguments. If no argument is an error, return
     the last ok value.
 
-    This function works as short-circuiting "and" as if Ok values are thruthy
+    This function works as short-circuiting "and" as if Ok values are truthy
     and Err values are falsy.
 
     Args:
@@ -879,13 +736,13 @@ def all(*values: Any) -> Any:
             It accepts any number of arguments (but only type checks up to 8).
 
     Examples:
-        >>> rz.all(1, 2, 3)
+        >>> rz.separate(1, 2, 3)
         3
-        >>> rz.all(1, rz.err("e1"), rz.err("e2"))
+        >>> rz.separate(1, rz.err("e1"), rz.err("e2"))
         Err('e1')
 
     See also:
-        - :func:`rz.coalesce`
+        - :func:`errorz.coalesce`
     """
     if len(values) == 1:
         values = values[0]
@@ -902,79 +759,26 @@ def all(*values: Any) -> Any:
         raise ValueError("all() expected at least one value")
 
 
+# fmt: off
 @overload
-def zip[T1, T2, E](
-    x1: Result[T1, E], x2: Result[T2, E], /
-) -> Result[tuple[T1, T2], E]: ...
-
+def zip[T, E](values: Iterable[Result[T, E]], /) -> Result[tuple[T, ...], E]: ...
 
 @overload
-def zip[T1, T2, T3, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
+def zip[T1, T2, E1, E2](x1: Result[T1, E1], x2: Result[T2, E2], /) -> Result[tuple[T1 , T2], E1 | E2]: ...
+
+@overload
+def zip[T1, T2, T3, E1, E2, E3, T4 = Never, T5 = Never, T6 = Never, T7 = Never, T8 = Never, E4 = Never, E5 = Never, E6 = Never, E7 = Never, E8 = Never](
+    x1: Result[T1, E1],
+    x2: Result[T2, E2], 
+    x3: Result[T3, E3], 
+    x4: Result[T4, E4] = MISSING, 
+    x5: Result[T5, E5] = MISSING, 
+    x6: Result[T6, E6] = MISSING, 
+    x7: Result[T7, E7] = MISSING, 
     /,
-) -> Result[tuple[T1, T2, T3], E]: ...
-
-
-@overload
-def zip[T1, T2, T3, T4, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    /,
-) -> Result[tuple[T1, T2, T3, T4], E]: ...
-
-
-@overload
-def zip[T1, T2, T3, T4, T5, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    /,
-) -> Result[tuple[T1, T2, T3, T4, T5], E]: ...
-
-
-@overload
-def zip[T1, T2, T3, T4, T5, T6, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    /,
-) -> Result[tuple[T1, T2, T3, T4, T5, T6], E]: ...
-
-
-@overload
-def zip[T1, T2, T3, T4, T5, T6, T7, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    /,
-) -> Result[tuple[T1, T2, T3, T4, T5, T6, T7], E]: ...
-
-
-@overload
-def zip[T1, T2, T3, T4, T5, T6, T7, T8, E](
-    x1: Result[T1, E],
-    x2: Result[T2, E],
-    x3: Result[T3, E],
-    x4: Result[T4, E],
-    x5: Result[T5, E],
-    x6: Result[T6, E],
-    x7: Result[T7, E],
-    x8: Result[T8, E],
-    /,
-) -> Result[tuple[T1, T2, T3, T4, T5, T6, T7, T8], E]: ...
+    *rest: Result[T8, E8], 
+) -> Result[tuple[T1 , T2 , T3 , T4 , T5 , T6 , T7 , T8], E1 | E2 | E3 | E4 | E5 | E6 | E7 | E8]: ...
+# fmt: on
 
 
 def zip(*args: Any) -> Any:
@@ -993,6 +797,9 @@ def zip(*args: Any) -> Any:
         Err('error')
 
     """
+    if len(args) == 1:
+        args = tuple(args[0])
+
     for arg in args:
         if isinstance(arg, Err):
             return arg
@@ -1075,22 +882,79 @@ class _CallFactory:
 
 call = _CallFactory()
 
+type FromException[E] = Callable[[Exception], E | None]
 
+
+@overload
 def call_checked[**P, R, E: Exception](
-    errors: type[E] | tuple[type[E], ...],
+    errors: type[E],
     fn: Callable[P, R],
     /,
     *args: P.args,
     **kwargs: P.kwargs,
-) -> Result[R, E]:
+) -> Result[R, E]: ...
+
+
+@overload
+def call_checked[**P, R, E](
+    errors: FromException[E],
+    fn: Callable[P, R],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> Result[R, E]: ...
+
+
+# fmt: off
+@overload
+def call_checked[
+    **P,
+    R,
+    E1: Exception,
+    E2: Exception,
+    E3: Exception = Never,
+    E4: Exception = Never,
+    E5: Exception = Never,
+    E6: Exception = Never,
+    E7: Exception = Never,
+    E8: Exception = Never,
+](
+    errors: 
+    tuple[type[E1]]
+    | tuple[type[E1], type[E2]]
+    | tuple[type[E1], type[E2], type[E3]]
+    | tuple[type[E1], type[E2], type[E3], type[E4]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5], type[E6]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5], type[E6], type[E7]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5], type[E6], type[E7], type[E8]],
+    fn: Callable[P, R],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> Result[R, E1 | E2 | E3 | E4 | E5 | E6 | E7 | E8]: ...
+# fmt: on
+
+
+def call_checked[**P, R, E: Exception](
+    errors: Any,
+    fn: Callable[P, R],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> Result[R, Any]:
     """
     Call the function with the given arguments and catch any exception of the given type.
 
     Args:
-        exception: The type of exception to catch and return as an error.
-        fn: The function to call.
-        *args: The positional arguments to pass to the function.
-        **kwargs: The keyword arguments to pass to the function.
+        exception:
+            The type of exception to catch and return as an error.
+        fn:
+            The function to call.
+        *args:
+            The positional arguments to pass to the function.
+        **kwargs:
+            The keyword arguments to pass to the function.
 
     Examples:
         >>> rz.call_checked(ZeroDivisionError, lambda x: 1 / x, 0)
@@ -1103,43 +967,58 @@ def call_checked[**P, R, E: Exception](
     try:
         return fn(*args, **kwargs)
     except BaseException as e:
-        if isinstance(e, errors):
+        if (
+            callable(errors)
+            and not isinstance(errors, type)
+            and not issubclass(cast(type, errors), Exception)
+        ):
+            if errors(e) is not None:
+                return Err(errors(e))
+        elif isinstance(e, cast(_ExcCatchable, errors)):
             return Err(e)
         raise e
 
 
-@overload
-def safe[**P, R]() -> Callable[[Callable[P, R]], Callable[P, Result[R, Exception]]]: ...
+type SafeDecorator[**P, R, E] = Callable[[Callable[P, R]], Callable[P, Result[R, E]]]
 
 
 @overload
-def safe[E: Exception, **P, R](
-    exception: type[E], /
-) -> Callable[[Callable[P, R]], Callable[P, Result[R, E]]]: ...
+def safe[**P, R]() -> SafeDecorator[P, R, Exception]: ...
 
 
 @overload
-def safe[E1: Exception, E2: Exception, R, **P](
-    exception: tuple[type[E1], type[E2]], /
+def safe[E: Exception, **P, R](exception: type[E], /) -> SafeDecorator[P, R, E]: ...
+
+
+@overload
+def safe[E, **P, R](exception: FromException[E], /) -> SafeDecorator[P, R, E]: ...
+
+
+# fmt: off
+@overload
+def safe[
+    **P,
+    R,
+    E1: Exception,
+    E2: Exception = Never,
+    E3: Exception = Never,
+    E4: Exception = Never,
+    E5: Exception = Never,
+    E6: Exception = Never,
+    E7: Exception = Never,
+    E8: Exception = Never,
+](
+    exception: tuple[type[E1]]  
+    | tuple[type[E1], type[E2]]
+    | tuple[type[E1], type[E2], type[E3]]
+    | tuple[type[E1], type[E2], type[E3], type[E4]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5], type[E6]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5], type[E6], type[E7]]
+    | tuple[type[E1], type[E2], type[E3], type[E4], type[E5], type[E6], type[E7], type[E8]],
+    /,
 ) -> Callable[[Callable[P, R]], Callable[P, Result[R, E1 | E2]]]: ...
-
-
-@overload
-def safe[E1: Exception, E2: Exception, E3: Exception, R, **P](
-    exception: tuple[type[E1], type[E2], type[E3]], /
-) -> Callable[[Callable[P, R]], Callable[P, Result[R, E1 | E2 | E3]]]: ...
-
-
-@overload
-def safe[E1: Exception, E2: Exception, E3: Exception, E4: Exception, R, **P](
-    exception: tuple[type[E1], type[E2], type[E3], type[E4]], /
-) -> Callable[[Callable[P, R]], Callable[P, Result[R, E1 | E2 | E3 | E4]]]: ...
-
-
-@overload
-def safe[E: Exception, R, **P](
-    exception: Iterable[type[E]], /
-) -> Callable[[Callable[P, R]], Callable[P, Result[R, E]]]: ...
+# fmt: on
 
 
 @overload

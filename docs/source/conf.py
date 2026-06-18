@@ -18,6 +18,7 @@ extensions = [
     "sphinx_mdinclude",
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
+    "sphinx.ext.intersphinx",
     "sphinx_autodoc_typehints",
 ]
 
@@ -29,6 +30,16 @@ typehints_document_overloads = False
 templates_path = ["_templates"]
 exclude_patterns = []  # type: ignore
 source_suffix = [".rst", ".md"]
+
+intersphinx_mapping = {
+    "hypothesis": ("https://hypothesis.readthedocs.io/en/latest/", None),
+    "python": ("https://docs.python.org/3", None),
+}
+
+nitpick_ignore = [
+    ("py:class", "typing.Any"),
+    ("py:class", "errorz.GenericAlias"),
+]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

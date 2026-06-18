@@ -1,6 +1,6 @@
 [project]
 name = "errorz"
-version = "0.2.1"
+version = "0.2.2"
 description = "Represent fallible computations as values, instead of using exceptions."
 readme = "README.md"
 authors = [
@@ -56,8 +56,15 @@ dev = [
 hypothesis = ["hypothesis>=6.155.2"]
 
 [tool.taskipy.tasks]
-docs = { cmd = "sphinx-build -b html docs/source docs/build", help = "Build HTML documentation" }
-docs-serve = { cmd = "sphinx-autobuild docs/source docs/build", help = "Serve HTML documentation with live reload" }
+docs = { cmd = "sphinx-build -b html docs/source docs/build -n", help = "Build HTML documentation" }
+docs-serve = { cmd = "sphinx-autobuild docs/source docs/build -n", help = "Serve HTML documentation with live reload" }
 test = "pytest tests"
 lint = "ruff check ."
 build = "uv build"
+release = """
+    uv run task lint \\
+        && uv run task test \\
+        && uv run task docs \\
+        && uv run task build \\
+        && git add . && git commit -m "Release $(uv version)" && git tag "v$(uv version --short)"
+"""

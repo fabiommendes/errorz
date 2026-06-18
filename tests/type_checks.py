@@ -59,9 +59,13 @@ def assert_errorz_types() -> None:
     #
     # Mapping functions
     #
+    def f_3(x: int, y: int, z: int) -> float:
+        return float(x + y + z)
+
     assert_type(rz.map(float, i), Result[float, E])
     assert_type(rz.map(add, i, i), Result[float, E])
     assert_type(rz.map(add, f, i), Result[float, E])
+    assert_type(rz.map(f_3, i, i, i), Result[float, E])
 
     #
     # Zips, coallesces, etc
@@ -118,3 +122,15 @@ def assert_match_cases() -> None:
             assert_type(error, E)
         case value:
             assert_type(value, int)
+
+
+def assert_checked_called_typing_trick() -> None:
+    def to_error(e: Exception) -> str | None:
+        return str(e)
+
+    def div(x: int, y: int) -> float:
+        return x / y
+
+    assert_type(rz.call_checked(ZeroDivisionError, div, 1, 2), Result[float, ZeroDivisionError])  # fmt: skip
+    assert_type(rz.call_checked(to_error, div, 1, 0), Result[float, str])
+    assert_type(rz.call_checked((ZeroDivisionError, ValueError), div, 1, 0),Result[float, ZeroDivisionError | ValueError])  # fmt: skip

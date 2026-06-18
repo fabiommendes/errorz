@@ -33,18 +33,21 @@ Unwrapping
 .. autofunction:: errorz.unwrap_lazy
 
 
-Mapping
--------
+Function calls
+--------------
+
+.. autofunction:: errorz.call
+.. autofunction:: errorz.call_checked
+.. autofunction:: errorz.safe
+
+
+Mapping, zipping and combining
+------------------------------
 
 .. autofunction:: errorz.map
-.. autofunction:: errorz.call
-
-
-Zipping and combining
----------------------
-
 .. autofunction:: errorz.zip
-.. autofunction:: errorz.together
+.. autofunction:: errorz.coalesce
+.. autofunction:: errorz.separate
 
 
 Iterators, sequences, and other collections

@@ -169,7 +169,6 @@ def explore_mypy_wrapper_union_inference() -> None:
     assert_type(map(abs, x), int | ErrW[Any])
     assert_type(map(abs, 1), int | ErrW[Never])  # pyright: ignore[reportAssertTypeFailure]
     assert_type(map(abs, e), int | ErrW[str])  # pyright: ignore[reportAssertTypeFailure]
-    assert_type(map(abs, cast("int | Box[Any]", e)), int | ErrW[Any])  # type: ignore[redundant-cast]
     assert_type(map(incr, ErrW("...")), int | ErrW[str])
     assert_type(id(x), int | ErrW[Any])
     assert_type(id(1), int | ErrW[Any])
