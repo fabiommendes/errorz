@@ -38,7 +38,7 @@ Function calls
 
 .. autofunction:: errorz.call
 .. autofunction:: errorz.call_checked
-.. autofunction:: errorz.safe
+.. autofunction:: errorz.catch
 
 
 Mapping, zipping and combining

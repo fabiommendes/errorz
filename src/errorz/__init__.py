@@ -958,45 +958,42 @@ def call_checked[**P, R, E: Exception](
 
     Examples:
         >>> rz.call_checked(ZeroDivisionError, lambda x: 1 / x, 0)
-        Err(ZeroDivisionError('division by zero'))
+        Err(ZeroDivisionError('...'))
         >>> rz.call_checked(ValueError, lambda x: 1 / x, 0)
         Traceback (most recent call last):
         ...
-        ZeroDivisionError: division by zero
+        ZeroDivisionError: ...
     """
     try:
         return fn(*args, **kwargs)
     except BaseException as e:
-        if (
-            callable(errors)
-            and not isinstance(errors, type)
-            and not issubclass(cast(type, errors), Exception)
-        ):
-            if errors(e) is not None:
-                return Err(errors(e))
-        elif isinstance(e, cast(_ExcCatchable, errors)):
-            return Err(e)
-        raise e
+        if isinstance(errors, (type, tuple)):
+            if isinstance(e, errors):
+                return Err(e)
+        elif (err_value := errors(e)) is not None:
+            return Err(err_value)
+
+        raise
 
 
 type SafeDecorator[**P, R, E] = Callable[[Callable[P, R]], Callable[P, Result[R, E]]]
 
 
 @overload
-def safe[**P, R]() -> SafeDecorator[P, R, Exception]: ...
+def catch[**P, R]() -> SafeDecorator[P, R, Exception]: ...
 
 
 @overload
-def safe[E: Exception, **P, R](exception: type[E], /) -> SafeDecorator[P, R, E]: ...
+def catch[E: Exception, **P, R](exception: type[E], /) -> SafeDecorator[P, R, E]: ...
 
 
 @overload
-def safe[E, **P, R](exception: FromException[E], /) -> SafeDecorator[P, R, E]: ...
+def catch[E, **P, R](exception: FromException[E], /) -> SafeDecorator[P, R, E]: ...
 
 
 # fmt: off
 @overload
-def safe[
+def catch[
     **P,
     R,
     E1: Exception,
@@ -1022,15 +1019,65 @@ def safe[
 
 
 @overload
-def safe(*args: Any) -> Any: ...
+def catch(*args: Any) -> Any: ...
 
 
-def safe(*errors: Any) -> Any:
+def catch(*errors: Any) -> Any:
+    """
+    A decorator that catches any exception of the given type and returns it as
+    an error.
+
+    Args:
+        exception:
+            The type of exception to catch and return as an error.
+            It also accept a function that takes an exception and returns
+            either the error value or None if the exception should not be caught
+
+        *args:
+            You can also pass different exception types as different arguments
+            to this decorator.
+
+
+    Examples:
+        >>> @rz.catch(ZeroDivisionError, ValueError)
+        ... def divide(x: int, y: int) -> int:
+        ...     return x // y
+        ...
+        >>> divide(10, 2)
+        5
+        >>> divide(10, 0)
+        Err(ZeroDivisionError('...'))
+
+        We can also pass a function that convert exceptions to error values, like
+        so
+
+        >>> def from_exception(e: Exception) -> str | None:
+        ...     if isinstance(e, ZeroDivisionError):
+        ...         return "division-by-zero"
+        ...     elif isinstance(e, ValueError):
+        ...         return "value-error"
+        ...     return None
+        ...
+        >>> @rz.catch(from_exception)
+        ... def divide(x: int, y: int) -> int:
+        ...     return x // y
+        ...
+        >>> divide(10, 0)
+        Err('division-by-zero')
+    """
+    assert ( 
+        all(isinstance(error, type) and issubclass(error, Exception) for error in errors) 
+        or len(errors) == 1 and callable(errors[0])
+    ), "catch() expects exception types or a single callable"  # fmt: skip
+
     if not errors:
         return lambda fn: _wrap_safe(
             fn, lambda *args, **kwargs: call(fn, *args, **kwargs)
         )
     else:
+        if len(errors) == 1:
+            errors = cast(Any, errors[0])
+
         return lambda fn: _wrap_safe(
             fn, lambda *args, **kwargs: call_checked(errors, fn, *args, **kwargs)
         )
@@ -1047,9 +1094,12 @@ def getattr[T, R: type, E](
     You can optionally specify the expected result type to get better type checking.
 
     Args:
-        obj: The optional object to get the attribute from.
-        attr: The name of the attribute to get.
-        type: The expected type of the attribute (optional).
+        obj:
+            The optional object to get the attribute from.
+        attr:
+            The name of the attribute to get.
+        type:
+            The expected type of the attribute (optional).
 
     Examples:
         >>> rz.getattr(42, "real")

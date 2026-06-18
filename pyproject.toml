@@ -64,7 +64,7 @@ build = "uv build"
 release = """
     uv run task lint \\
         && uv run task test \\
-        && uv run task docs \\
+        && uv run sphinx-build -b html docs/source docs/build -n -W \\
         && uv run task build \\
         && git add . && git commit -m "Release $(uv version)" && git tag "v$(uv version --short)"
 """

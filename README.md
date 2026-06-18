@@ -89,21 +89,35 @@ rz.map(add, success, success) # 42 + 42
 rz.map(add, success, failure) # Err("error")
 ```
 
-In the [API documentation](https://errorz.readthedocs.io/en/latest/api.html) you can find other similar utility functions.
+In the [API documentation](https://errorz.readthedocs.io/en/latest/api.html) you
+can find other similar utility functions.
 
-When interacting with exception-throwing code, you can use `errorz.call_checked` to catch exceptions and return them as errors:
+When interacting with exception-throwing code, you can use `errorz.call_checked`
+to catch exceptions and return them as errors:
 
 ```python
+def invert(x):
+    return 1 / x
 
+rz.call_checked(ZeroDivisionError, invert, 0) # Err(ZeroDivisionError("division by zero"))
+```
 
+We may also handle the error in the function definition, instead of the call site:
 
+```python
+@rz.catch(ZeroDivisionError)
+def invert(x: float) -> float:
+    return 1 / x
+```
 
+The decorated function becomes `invert(float) -> Result[float, ZeroDivisionError]`
+and now return `Err[ZeroDivisionError]` if a `ZeroDivisionError` is raised.
 
 ## Documentation
 
-The documentation is available at https://optionz.rtfd.io/ and includes more 
+The documentation is available at https://errorz.readthedocs.io/en/latest/ and includes more 
 examples and explanations of the functions provided by the library.
 
 ## License
 
-Optionz is licensed under the MIT License. See [LICENSE](LICENSE) for more details.
+Errorz is licensed under the MIT License. See [LICENSE](LICENSE) for more details.
